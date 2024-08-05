@@ -10,8 +10,6 @@ import random
 import sqlite3
 import pandas as pd
 from difflib import SequenceMatcher
-from collections import Counter
-import numpy as np
 
 # Access your API key
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -172,46 +170,32 @@ def query_pinecone(query, top_k=5):
     return " ".join(contexts)
 
 def identify_intents(query):
-    intent_prompt = f"""Analyze the following query and identify the primary intent. 
-    Provide a detailed classification of the intent, including:
-    1. The main topic or subject area (e.g., academics, student life, administration)
-    2. The specific action or information requested (e.g., how to do something, what is something, where to find information)
-    3. Any key entities or concepts mentioned
-
-    Query: {query}
-
-    Respond with a structured intent classification."""
-
+    intent_prompt = f"Identify the main intent or question within this query. Provide only one primary intent: {query}"
     intent_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are an advanced intent classification assistant. Provide a detailed and structured classification of the primary intent within the given query."},
+            {"role": "system", "content": "You are an intent identification assistant. Identify and provide only the primary intent or question within the given query."},
             {"role": "user", "content": intent_prompt}
         ]
     )
     intent = intent_response.choices[0].message.content.strip()
-    return intent
+    return [intent] if intent else []
+def generate_keywords_per_intent(intents):
+    intent_keywords = {}
+    for intent in intents:
+        keyword_prompt = f"Generate 5-10 relevant keywords or phrases for this intent, separated by commas: {intent}"
+        keyword_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a keyword extraction assistant. Generate relevant keywords or phrases for the given intent."},
+                {"role": "user", "content": keyword_prompt}
+            ]
+        )
+        keywords = keyword_response.choices[0].message.content.strip().split(',')
+        intent_keywords[intent] = [keyword.strip() for keyword in keywords]
+    return intent_keywords
 
-def generate_keywords_per_intent(intent):
-    keyword_prompt = f"""Based on the following structured intent classification, generate 10-15 highly relevant keywords or phrases. 
-    Ensure the keywords cover all aspects of the intent, including the main topic, specific action, and key entities.
-
-    Intent Classification:
-    {intent}
-
-    Provide a comma-separated list of keywords."""
-
-    keyword_response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a keyword extraction assistant. Generate highly relevant keywords based on the given structured intent classification."},
-            {"role": "user", "content": keyword_prompt}
-        ]
-    )
-    keywords = keyword_response.choices[0].message.content.strip().split(',')
-    return [keyword.strip() for keyword in keywords]
-
-def query_db_for_keywords(keywords, intent):
+def query_db_for_keywords(keywords):
     conn = get_database_connection()
     c = conn.cursor()
     query = """
@@ -220,38 +204,21 @@ def query_db_for_keywords(keywords, intent):
     WHERE tags LIKE ?
     """
     results = []
-    keyword_counts = Counter(keywords)
-    
-    for keyword in set(keywords):  # Use set to avoid duplicate queries
+    for keyword in keywords:
         c.execute(query, (f'%{keyword}%',))
         for row in c.fetchall():
-            # Calculate TF-IDF inspired score
-            tf = sum(tag.lower().count(keyword.lower()) for tag in row[2].split(','))
-            idf = np.log(len(keywords) / (keyword_counts[keyword] + 1))
-            relevance_score = tf * idf
-            
-            # Calculate intent similarity
-            intent_similarity = SequenceMatcher(None, intent.lower(), row[2].lower()).ratio()
-            
-            # Combine scores
-            combined_score = relevance_score * 0.7 + intent_similarity * 0.3
-            
-            results.append((combined_score, row))
+            score = sum(SequenceMatcher(None, keyword.lower(), tag.lower()).ratio() for tag in row[2].split(','))
+            results.append((score, row))
     
-    # Sort by score in descending order
+    # Sort by score in descending order and return the top 3 results
     results.sort(reverse=True, key=lambda x: x[0])
-    
-    # Filter results based on a threshold
-    threshold = np.mean([score for score, _ in results]) + np.std([score for score, _ in results])
-    filtered_results = [result for result in results if result[0] >= threshold]
-    
-    return filtered_results[:3]  # Return top 3 results above threshold
+    return results[:3]
 
-def query_for_multiple_intents(intent_keywords, classified_intent):
+def query_for_multiple_intents(intent_keywords):
     intent_data = {}
     all_db_results = set()  # Use a set to store unique documents
     for intent, keywords in intent_keywords.items():
-        db_results = query_db_for_keywords(keywords, classified_intent)
+        db_results = query_db_for_keywords(keywords)
         
         # Filter out already seen documents
         new_db_results = [result for result in db_results if result[1][0] not in [r[1][0] for r in all_db_results]]
@@ -264,7 +231,7 @@ def query_for_multiple_intents(intent_keywords, classified_intent):
         }
     return intent_data
 
-def generate_multi_intent_answer(query, intent_data, classified_intent):
+def generate_multi_intent_answer(query, intent_data):
     context = "\n".join([f"Intent: {intent}\nDB Results: {data['db_results']}\nPinecone Context: {data['pinecone_context']}" for intent, data in intent_data.items()])
     max_context_tokens = 4000
     truncated_context = truncate_text(context, max_context_tokens)
@@ -283,7 +250,7 @@ def generate_multi_intent_answer(query, intent_data, classified_intent):
 8. Respect academic integrity by not writing essays or completing assignments on behalf of students.
 9. Suggest additional resources only if directly relevant to the primary query.
 """},
-            {"role": "user", "content": f"Query: {query}\n\nClassified Intent: {classified_intent}\n\nContext: {truncated_context}"}
+            {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}"}
         ]
     )
    
@@ -301,22 +268,26 @@ def extract_keywords_from_response(response):
     keywords = keyword_response.choices[0].message.content.strip().split(',')
     return [keyword.strip() for keyword in keywords]
 
+# Updated get_answer function
 def get_answer(query):
-    classified_intent = identify_intents(query)
-    keywords = generate_keywords_per_intent(classified_intent)
+    intents = identify_intents(query)
+    intent_keywords = generate_keywords_per_intent(intents)
+    intent_data = query_for_multiple_intents(intent_keywords)
+    initial_answer = generate_multi_intent_answer(query, intent_data)
     
-    intent_data = query_for_multiple_intents({query: keywords}, classified_intent)
-    initial_answer = generate_multi_intent_answer(query, intent_data, classified_intent)
-    
+    # Extract keywords from the initial answer
     response_keywords = extract_keywords_from_response(initial_answer)
     
-    all_keywords = list(set(keywords + response_keywords))
+    # Combine original keywords with response keywords, prioritizing original query keywords
+    all_keywords = list(set(intent_keywords[intents[0]] + response_keywords))
     
-    expanded_intent_data = query_for_multiple_intents({query: all_keywords}, classified_intent)
+    # Query again with the expanded set of keywords
+    expanded_intent_data = query_for_multiple_intents({query: all_keywords})
     
-    final_answer = generate_multi_intent_answer(query, expanded_intent_data, classified_intent)
+    # Generate the final answer with the expanded context
+    final_answer = generate_multi_intent_answer(query, expanded_intent_data)
     
-    return final_answer, expanded_intent_data, all_keywords, classified_intent
+    return final_answer, expanded_intent_data, all_keywords
 
 # Streamlit Interface
 st.set_page_config(page_title="College Buddy Assistant", layout="wide")
@@ -380,14 +351,10 @@ if st.button("Get Answer"):
 # Update the answer display section
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
-        answer, intent_data, keywords, classified_intent = get_answer(st.session_state.current_question)
+        answer, intent_data, keywords = get_answer(st.session_state.current_question)
         
         st.subheader("Question:")
         st.write(st.session_state.current_question)
-        
-        st.subheader("Classified Intent:")
-        st.write(classified_intent)
-        
         st.subheader("Answer:")
         st.write(answer)
         
@@ -395,12 +362,12 @@ if 'current_question' in st.session_state:
         st.write(", ".join(keywords))
         
         st.subheader("Related Documents:")
-        displayed_docs = set()
+        displayed_docs = set()  # Use a set to keep track of displayed documents
         for intent, data in intent_data.items():
             for score, doc in data['db_results']:
-                if doc[0] not in displayed_docs:
+                if doc[0] not in displayed_docs:  # Check if the document has already been displayed
                     displayed_docs.add(doc[0])
-                    with st.expander(f"Document: {doc[1]} (Relevance: {score:.2f})"):
+                    with st.expander(f"Document: {doc[1]}"):
                         st.write(f"ID: {doc[0]}")
                         st.write(f"Title: {doc[1]}")
                         st.write(f"Tags: {doc[2]}")
@@ -427,7 +394,3 @@ if 'chat_history' in st.session_state and st.session_state.chat_history:
     for i, (q, a) in enumerate(reversed(st.session_state.chat_history[-5:])):
         with st.expander(f"Q: {q}"):
             st.write(f"A: {a}")
-
-# Footer
-st.markdown("---")
-st.markdown("College Buddy Assistant - Powered by AI")
