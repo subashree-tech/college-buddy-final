@@ -51,6 +51,11 @@ EXAMPLE_QUESTIONS = [
 def get_database_connection():
     conn = sqlite3.connect('college_buddy.db', check_same_thread=False)
     return conn
+def init_db(conn):
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS documents
+                 (id INTEGER PRIMARY KEY, title TEXT, tags TEXT, links TEXT)''')
+    conn.commit()
 
 def load_initial_data():
     try:
