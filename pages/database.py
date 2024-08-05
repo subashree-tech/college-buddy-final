@@ -22,6 +22,13 @@ def insert_document(title, tags, links):
         return True
     return False
 
+def delete_document(doc_id):
+    conn = get_database_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    return True
+
 def show():
     st.title("Database Management")
 
@@ -45,7 +52,33 @@ def show():
     documents = get_all_documents()
     if documents:
         df = pd.DataFrame(documents, columns=['ID', 'Title', 'Tags', 'Links'])
-        st.dataframe(df)
+        
+        # Create a column for delete buttons
+        df['Delete'] = ['Delete' for _ in range(len(df))]
+        
+        # Display the dataframe with a column width adjustment for the delete column
+        st.data_editor(
+            df,
+            column_config={
+                "Delete": st.column_config.ButtonColumn(
+                    "Delete",
+                    help="Click to delete this document",
+                    width="small"
+                )
+            },
+            hide_index=True,
+            key="data_editor"
+        )
+        
+        # Check if any delete button was clicked
+        if st.session_state.data_editor:
+            edited_rows = st.session_state.data_editor['edited_rows']
+            for idx, row in edited_rows.items():
+                if row.get('Delete'):
+                    doc_id = df.iloc[idx]['ID']
+                    if delete_document(doc_id):
+                        st.success(f"Document with ID {doc_id} deleted successfully!")
+                        st.rerun()
     else:
         st.write("The database is empty.")
 
