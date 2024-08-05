@@ -170,30 +170,43 @@ def query_pinecone(query, top_k=5):
     return " ".join(contexts)
 
 def identify_intents(query):
-    intent_prompt = f"Identify the main intent or question within this query. Provide only one primary intent: {query}"
+    intent_prompt = f"""Analyze the following query and identify the primary intent. 
+    Provide a detailed classification of the intent, including:
+    1. The main topic or subject area (e.g., academics, student life, administration)
+    2. The specific action or information requested (e.g., how to do something, what is something, where to find information)
+    3. Any key entities or concepts mentioned
+
+    Query: {query}
+
+    Respond with a structured intent classification."""
+
     intent_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are an intent identification assistant. Identify and provide only the primary intent or question within the given query."},
+            {"role": "system", "content": "You are an advanced intent classification assistant. Provide a detailed and structured classification of the primary intent within the given query."},
             {"role": "user", "content": intent_prompt}
         ]
     )
     intent = intent_response.choices[0].message.content.strip()
-    return [intent] if intent else []
-def generate_keywords_per_intent(intents):
-    intent_keywords = {}
-    for intent in intents:
-        keyword_prompt = f"Generate 5-10 relevant keywords or phrases for this intent, separated by commas: {intent}"
-        keyword_response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a keyword extraction assistant. Generate relevant keywords or phrases for the given intent."},
-                {"role": "user", "content": keyword_prompt}
-            ]
-        )
-        keywords = keyword_response.choices[0].message.content.strip().split(',')
-        intent_keywords[intent] = [keyword.strip() for keyword in keywords]
-    return intent_keywords
+    return intent
+def generate_keywords_per_intent(intent):
+    keyword_prompt = f"""Based on the following structured intent classification, generate 10-15 highly relevant keywords or phrases. 
+    Ensure the keywords cover all aspects of the intent, including the main topic, specific action, and key entities.
+
+    Intent Classification:
+    {intent}
+
+    Provide a comma-separated list of keywords."""
+
+    keyword_response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a keyword extraction assistant. Generate highly relevant keywords based on the given structured intent classification."},
+            {"role": "user", "content": keyword_prompt}
+        ]
+    )
+    keywords = keyword_response.choices[0].message.content.strip().split(',')
+    return [keyword.strip() for keyword in keywords]
 
 def query_db_for_keywords(keywords):
     conn = get_database_connection()
@@ -270,24 +283,21 @@ def extract_keywords_from_response(response):
 
 # Updated get_answer function
 def get_answer(query):
-    intents = identify_intents(query)
-    intent_keywords = generate_keywords_per_intent(intents)
-    intent_data = query_for_multiple_intents(intent_keywords)
+    intent = identify_intents(query)
+    keywords = generate_keywords_per_intent(intent)
+    
+    intent_data = query_for_multiple_intents({query: keywords})
     initial_answer = generate_multi_intent_answer(query, intent_data)
     
-    # Extract keywords from the initial answer
     response_keywords = extract_keywords_from_response(initial_answer)
     
-    # Combine original keywords with response keywords, prioritizing original query keywords
-    all_keywords = list(set(intent_keywords[intents[0]] + response_keywords))
+    all_keywords = list(set(keywords + response_keywords))
     
-    # Query again with the expanded set of keywords
     expanded_intent_data = query_for_multiple_intents({query: all_keywords})
     
-    # Generate the final answer with the expanded context
     final_answer = generate_multi_intent_answer(query, expanded_intent_data)
     
-    return final_answer, expanded_intent_data, all_keywords
+    return final_answer, expanded_intent_data, all_keywords, intent
 
 # Streamlit Interface
 st.set_page_config(page_title="College Buddy Assistant", layout="wide")
@@ -351,12 +361,17 @@ if st.button("Get Answer"):
 # Update the answer display section
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
-        answer, intent_data, keywords = get_answer(st.session_state.current_question)
+        answer, intent_data, keywords, classified_intent = get_answer(st.session_state.current_question)
         
         st.subheader("Question:")
         st.write(st.session_state.current_question)
+        
+        st.subheader("Classified Intent:")
+        st.write(classified_intent)
+        
         st.subheader("Answer:")
         st.write(answer)
+        
         
         st.subheader("Related Keywords:")
         st.write(", ".join(keywords))
