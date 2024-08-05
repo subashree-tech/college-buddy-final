@@ -34,6 +34,12 @@ def delete_document_by_title(title):
 def show():
     st.title("Database Management")
 
+    # Initialize session state
+    if 'add_success' not in st.session_state:
+        st.session_state.add_success = False
+    if 'delete_success' not in st.session_state:
+        st.session_state.delete_success = False
+
     # Form for adding new documents
     st.header("Add New Document")
     new_doc_title = st.text_input("Document Title", key="add_title")
@@ -43,8 +49,7 @@ def show():
     if st.button("Add Document"):
         if new_doc_title and new_doc_tags and new_doc_links:
             if insert_document(new_doc_title, new_doc_tags, new_doc_links):
-                st.success(f"Document '{new_doc_title}' added successfully!")
-                st.experimental_rerun()
+                st.session_state.add_success = True
             else:
                 st.warning("Failed to add document. Please check your inputs.")
         else:
@@ -57,12 +62,20 @@ def show():
     if st.button("Delete Document"):
         if del_doc_title:
             if delete_document_by_title(del_doc_title):
-                st.success(f"Document '{del_doc_title}' deleted successfully!")
-                st.experimental_rerun()
+                st.session_state.delete_success = True
             else:
                 st.warning(f"No document found with the title '{del_doc_title}'.")
         else:
             st.warning("Please enter a document title to delete.")
+
+    # Display success messages
+    if st.session_state.add_success:
+        st.success(f"Document '{new_doc_title}' added successfully!")
+        st.session_state.add_success = False
+
+    if st.session_state.delete_success:
+        st.success(f"Document '{del_doc_title}' deleted successfully!")
+        st.session_state.delete_success = False
 
     # Display existing documents
     st.header("Existing Documents")
