@@ -239,7 +239,7 @@ def get_answer(query):
     all_keywords = list(set(query_keywords + answer_keywords))
     
     # Query the database using the combined keywords
-    related_docs = query_db_for_keywords(all_keywords, top_k=3)
+    related_docs = query_db_for_keywords(all_keywords, top_k=1)
     
     # Generate a final response incorporating the related document information
     docs_info = "\n".join([f"Document {i+1}: {doc[1]}" for i, doc in enumerate(related_docs)])
