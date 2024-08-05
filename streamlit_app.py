@@ -296,15 +296,7 @@ with st.sidebar:
         st.subheader("Uploaded Documents")
         st.text(f"Total token count: {total_token_count}")
 
-    # Database details
-    st.header("Database Contents")
-    if st.button("Show/Hide Database"):
-        documents = get_all_documents()
-        if documents:
-            df = pd.DataFrame(documents, columns=['ID', 'Title', 'Tags', 'Links'])
-            st.dataframe(df)
-        else:
-            st.write("The database is empty.")
+   
 
 # Main content area
 st.header("Popular Questions")
@@ -356,7 +348,8 @@ if 'current_question' in st.session_state:
                         for keyword in keywords:
                             highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
                         st.markdown(f"Matched Tags: {highlighted_tags}")
-    
+    if st.button("View Database"):
+        st.switch_page("pages/database.py")
     # Add to chat history
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
