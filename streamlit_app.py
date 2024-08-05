@@ -170,25 +170,22 @@ def query_pinecone(query, top_k=5):
     return " ".join(contexts)
 
 def identify_intents(query):
-    intent_prompt = f"""Analyze the following query and identify the primary intent. 
-    Provide a detailed classification of the intent, including:
-    1. The main topic or subject area (e.g., academics, student life, administration)
-    2. The specific action or information requested (e.g., how to do something, what is something, where to find information)
-    3. Any key entities or concepts mentioned
+    intent_prompt = f"""Analyze the following query and identify all distinct intents or questions.
+    List each intent or question separately.
 
     Query: {query}
 
-    Respond with a structured intent classification."""
+    Respond with a numbered list of intents/questions."""
 
     intent_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are an advanced intent classification assistant. Provide a detailed and structured classification of the primary intent within the given query."},
+            {"role": "system", "content": "You are an intent identification assistant. Identify and list all distinct intents or questions within the given query."},
             {"role": "user", "content": intent_prompt}
         ]
     )
-    intent = intent_response.choices[0].message.content.strip()
-    return intent
+    intents = intent_response.choices[0].message.content.strip().split('\n')
+    return [intent.strip() for intent in intents if intent.strip()]
 def generate_keywords_per_intent(intent):
     keyword_prompt = f"""Based on the following structured intent classification, generate 10-15 highly relevant keywords or phrases. 
     Ensure the keywords cover all aspects of the intent, including the main topic, specific action, and key entities.
@@ -253,16 +250,20 @@ def generate_multi_intent_answer(query, intent_data):
         model="gpt-4o",
         messages=[
             {"role": "system", "content": """You are College Buddy, an AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
-1. Focus on addressing the primary intent of the query.
-2. Provide accurate, relevant information derived from the provided context.
-3. If the context doesn't contain sufficient information to answer the query, state this clearly.
-4. Maintain a friendly, supportive tone appropriate for assisting students.
-5. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
-6. If asked about topics beyond the scope of the provided context, politely state that you don't have that information.
-7. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
-8. Respect academic integrity by not writing essays or completing assignments on behalf of students.
-9. Suggest additional resources only if directly relevant to the primary query.
-"""},
+
+1. First, clearly state the number of distinct intents or questions identified in the user's query.
+2. For each intent or question, provide a separate, comprehensive answer.
+3. Use the provided context to answer each intent or question accurately and relevantly.
+4. If the context doesn't contain sufficient information to answer any part of the query, state this clearly for that specific intent or question.
+5. Maintain a friendly, supportive tone appropriate for assisting students.
+6. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
+7. If asked about topics beyond the scope of the provided context, politely state that you don't have that information for the specific intent or question.
+8. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
+9. Respect academic integrity by not writing essays or completing assignments on behalf of students.
+10. Suggest additional resources only if directly relevant to the specific intent or question.
+11. After answering each intent or question, list the most relevant related documents for that specific intent, if available.
+
+Structure your response clearly, addressing each intent or question separately."""},
             {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}"}
         ]
     )
@@ -283,22 +284,26 @@ def extract_keywords_from_response(response):
 
 # Updated get_answer function
 def get_answer(query):
-    intent = identify_intents(query)
-    keywords = generate_keywords_per_intent(intent)
+    intents = identify_intents(query)
+    all_keywords = []
+    intent_data = {}
     
-    intent_data = query_for_multiple_intents({query: keywords})
+    for intent in intents:
+        keywords = generate_keywords_per_intent(intent)
+        all_keywords.extend(keywords)
+        intent_data.update(query_for_multiple_intents({intent: keywords}))
+    
     initial_answer = generate_multi_intent_answer(query, intent_data)
     
     response_keywords = extract_keywords_from_response(initial_answer)
     
-    all_keywords = list(set(keywords + response_keywords))
+    all_keywords = list(set(all_keywords + response_keywords))
     
     expanded_intent_data = query_for_multiple_intents({query: all_keywords})
     
     final_answer = generate_multi_intent_answer(query, expanded_intent_data)
     
-    return final_answer, expanded_intent_data, all_keywords, intent
-
+    return final_answer, expanded_intent_data, all_keywords, intents
 # Streamlit Interface
 st.set_page_config(page_title="College Buddy Assistant", layout="wide")
 st.title("College Buddy Assistant")
@@ -361,34 +366,33 @@ if st.button("Get Answer"):
 # Update the answer display section
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
-        answer, intent_data, keywords, classified_intent = get_answer(st.session_state.current_question)
+        answer, intent_data, keywords, identified_intents = get_answer(st.session_state.current_question)
         
         st.subheader("Question:")
         st.write(st.session_state.current_question)
         
-        st.subheader("Classified Intent:")
-        st.write(classified_intent)
+        st.subheader("Identified Intents:")
+        for i, intent in enumerate(identified_intents, 1):
+            st.write(f"{i}. {intent}")
         
         st.subheader("Answer:")
         st.write(answer)
-        
         
         st.subheader("Related Keywords:")
         st.write(", ".join(keywords))
         
         st.subheader("Related Documents:")
-        displayed_docs = set()  # Use a set to keep track of displayed documents
+        displayed_docs = set()
         for intent, data in intent_data.items():
             for score, doc in data['db_results']:
-                if doc[0] not in displayed_docs:  # Check if the document has already been displayed
+                if doc[0] not in displayed_docs:
                     displayed_docs.add(doc[0])
-                    with st.expander(f"Document: {doc[1]}"):
+                    with st.expander(f"Document: {doc[1]} (Relevance: {score:.2f})"):
                         st.write(f"ID: {doc[0]}")
                         st.write(f"Title: {doc[1]}")
                         st.write(f"Tags: {doc[2]}")
                         st.write(f"Link: {doc[3]}")
                         
-                        # Highlight matching keywords in tags
                         highlighted_tags = doc[2]
                         for keyword in keywords:
                             highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
