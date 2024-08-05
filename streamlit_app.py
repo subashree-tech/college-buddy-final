@@ -169,7 +169,6 @@ def query_pinecone(query, top_k=5):
             contexts.append(f"Content from {match['metadata'].get('file_name', 'unknown file')}")
     return " ".join(contexts)
 
-# CHANGE 1: Modified to generate more keywords
 def generate_related_keywords(text):
     keyword_prompt = f"Generate 10-20 relevant keywords or phrases from this text, separated by commas: {text}"
     keyword_response = client.chat.completions.create(
@@ -182,7 +181,7 @@ def generate_related_keywords(text):
     keywords = keyword_response.choices[0].message.content.strip().split(',')
     return [keyword.strip() for keyword in keywords]
 
-# CHANGE 2: Modified to return multiple top-scoring documents
+#  Modified to return multiple top-scoring documents
 def query_db_for_keywords(keywords, top_k=3):
     conn = get_database_connection()
     c = conn.cursor()
