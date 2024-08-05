@@ -90,6 +90,21 @@ def load_initial_data():
         st.success("Initial data loaded successfully")
     except Exception as e:
         st.error(f"Error loading initial data: {str(e)}")
+def get_all_documents():
+    conn = get_database_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, title, tags, links FROM documents WHERE tags != '' AND links != ''")
+    return c.fetchall()
+
+def test_db_connection():
+    try:
+        conn = get_database_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM documents")
+        count = c.fetchone()[0]
+        st.write(f"Number of documents in database: {count}")
+    except Exception as e:
+        st.error(f"Database connection error: {str(e)}")
 # Function to extract text from DOCX
 def extract_text_from_docx(file):
     doc = Document(file)
