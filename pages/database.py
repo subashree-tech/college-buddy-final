@@ -42,6 +42,7 @@ def show():
         if new_doc_title and new_doc_tags and new_doc_links:
             if insert_document(new_doc_title, new_doc_tags, new_doc_links):
                 st.success(f"Document '{new_doc_title}' added successfully!")
+                st.experimental_rerun()
             else:
                 st.warning("Failed to add document. Please check your inputs.")
         else:
@@ -51,21 +52,16 @@ def show():
     st.header("Existing Documents")
     documents = get_all_documents()
     if documents:
+        df = pd.DataFrame(documents, columns=['ID', 'Title', 'Tags', 'Links'])
+        st.table(df)
+
+        # Create delete buttons
+        st.subheader("Delete Documents")
         for doc in documents:
-            col1, col2, col3, col4, col5 = st.columns([1,2,2,2,1])
-            with col1:
-                st.write(doc[0])  # ID
-            with col2:
-                st.write(doc[1])  # Title
-            with col3:
-                st.write(doc[2])  # Tags
-            with col4:
-                st.write(doc[3])  # Links
-            with col5:
-                if st.button('Delete', key=f"del_{doc[0]}"):
-                    if delete_document(doc[0]):
-                        st.success(f"Document with ID {doc[0]} deleted successfully!")
-                        st.experimental_rerun()
+            if st.button(f"Delete document {doc[0]}", key=f"del_{doc[0]}"):
+                if delete_document(doc[0]):
+                    st.success(f"Document with ID {doc[0]} deleted successfully!")
+                    st.experimental_rerun()
     else:
         st.write("The database is empty.")
 
