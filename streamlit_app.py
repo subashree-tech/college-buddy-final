@@ -170,17 +170,16 @@ def query_pinecone(query, top_k=5):
     return " ".join(contexts)
 
 def identify_intents(query):
-    intent_prompt = f"Identify the main intents or questions within this query. Provide each intent as a separate item: {query}"
+    intent_prompt = f"Identify the main intent or question within this query. Provide only one primary intent: {query}"
     intent_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are an intent identification assistant. Identify and list the main intents or questions within the given query."},
+            {"role": "system", "content": "You are an intent identification assistant. Identify and provide only the primary intent or question within the given query."},
             {"role": "user", "content": intent_prompt}
         ]
     )
-    intents = intent_response.choices[0].message.content.strip().split('\n')
-    return [intent.strip() for intent in intents if intent.strip()]
-
+    intent = intent_response.choices[0].message.content.strip()
+    return [intent] if intent else []
 def generate_keywords_per_intent(intents):
     intent_keywords = {}
     for intent in intents:
@@ -228,23 +227,22 @@ def query_for_multiple_intents(intent_keywords):
 
 def generate_multi_intent_answer(query, intent_data):
     context = "\n".join([f"Intent: {intent}\nDB Results: {data['db_results']}\nPinecone Context: {data['pinecone_context']}" for intent, data in intent_data.items()])
-    max_context_tokens = 4000  # Increased from 3000
+    max_context_tokens = 4000
     truncated_context = truncate_text(context, max_context_tokens)
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": """You are College Buddy, an advanced AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
-1. Address all identified intents in the query comprehensively.
-2. Focus on delivering accurate, relevant information derived from the provided context for each intent.
-3. If the context doesn't contain sufficient information to answer an intent, state this clearly and offer to help with what is available.
+            {"role": "system", "content": """You are College Buddy, an AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
+1. Focus on addressing the primary intent of the query.
+2. Provide accurate, relevant information derived from the provided context.
+3. If the context doesn't contain sufficient information to answer the query, state this clearly.
 4. Maintain a friendly, supportive tone appropriate for assisting students.
 5. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
-6. If asked about topics beyond the scope of the provided context, politely redirect the conversation to the available information.
+6. If asked about topics beyond the scope of the provided context, politely state that you don't have that information.
 7. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
 8. Respect academic integrity by not writing essays or completing assignments on behalf of students.
-9. Additional Resources: Suggest any additional resources or videos for further learning.
-   Include citations for the title of the video the information is from and the timestamp where relevant information is presented.
+9. Suggest additional resources only if directly relevant to the primary query.
 """},
             {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}"}
         ]
@@ -274,8 +272,8 @@ def get_answer(query):
     # Extract keywords from the initial answer
     response_keywords = extract_keywords_from_response(initial_answer)
     
-    # Combine original keywords with response keywords
-    all_keywords = list(set([keyword for keywords in intent_keywords.values() for keyword in keywords] + response_keywords))
+    # Combine original keywords with response keywords, prioritizing original query keywords
+    all_keywords = list(set(intent_keywords[intents[0]] + response_keywords))
     
     # Query again with the expanded set of keywords
     expanded_intent_data = query_for_multiple_intents({query: all_keywords})
