@@ -182,7 +182,7 @@ def generate_related_keywords(text):
     return [keyword.strip() for keyword in keywords]
 
 #  Modified to return multiple top-scoring documents
-def query_db_for_keywords(keywords, top_k=3):
+def query_db_for_keywords(keywords, top_k=1):
     conn = get_database_connection()
     c = conn.cursor()
     query = """
