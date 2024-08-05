@@ -59,7 +59,7 @@ def init_db(conn):
     conn.commit()
 
 def load_initial_data():
-    try:
+
         conn = get_database_connection()
         data = [
             # ... (your initial data here)
