@@ -9,3 +9,5 @@ cdifflib
 TIME-python
 random2
 db-sqlite3
+numpy
+Counter
