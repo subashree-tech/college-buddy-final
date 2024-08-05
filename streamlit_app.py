@@ -216,11 +216,17 @@ def query_db_for_keywords(keywords):
 
 def query_for_multiple_intents(intent_keywords):
     intent_data = {}
+    all_db_results = set()  # Use a set to store unique documents
     for intent, keywords in intent_keywords.items():
         db_results = query_db_for_keywords(keywords)
+        
+        # Filter out already seen documents
+        new_db_results = [result for result in db_results if result[1][0] not in [r[1][0] for r in all_db_results]]
+        all_db_results.update(new_db_results)
+        
         pinecone_context = query_pinecone(" ".join(keywords))
         intent_data[intent] = {
-            'db_results': db_results,
+            'db_results': new_db_results,
             'pinecone_context': pinecone_context
         }
     return intent_data
@@ -356,21 +362,23 @@ if 'current_question' in st.session_state:
         st.write(", ".join(keywords))
         
         st.subheader("Related Documents:")
+        displayed_docs = set()  # Use a set to keep track of displayed documents
         for intent, data in intent_data.items():
-            with st.expander(f"Intent: {intent}"):
-                for score, doc in data['db_results']:
-                    st.write(f"Document: {doc[1]}")
-                    st.write(f"ID: {doc[0]}")
-                    st.write(f"Title: {doc[1]}")
-                    st.write(f"Tags: {doc[2]}")
-                    st.write(f"Link: {doc[3]}")
-                    
+            for score, doc in data['db_results']:
+                if doc[0] not in displayed_docs:  # Check if the document has already been displayed
+                    displayed_docs.add(doc[0])
+                    with st.expander(f"Document: {doc[1]}"):
+                        st.write(f"ID: {doc[0]}")
+                        st.write(f"Title: {doc[1]}")
+                        st.write(f"Tags: {doc[2]}")
+                        st.write(f"Link: {doc[3]}")
+                        
                         # Highlight matching keywords in tags
-                    highlighted_tags = doc[2]
-                    for keyword in keywords:
-                        highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
-                    st.markdown(f"Matched Tags: {highlighted_tags}")
-                    st.write("---")
+                        highlighted_tags = doc[2]
+                        for keyword in keywords:
+                            highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
+                        st.markdown(f"Matched Tags: {highlighted_tags}")
+                        st.write("---")
     
     # Add to chat history
     if 'chat_history' not in st.session_state:
