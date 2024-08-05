@@ -169,43 +169,21 @@ def query_pinecone(query, top_k=5):
             contexts.append(f"Content from {match['metadata'].get('file_name', 'unknown file')}")
     return " ".join(contexts)
 
-def identify_intents(query):
-    intent_prompt = f"""Analyze the following query and identify all distinct intents or questions.
-    List each intent or question separately.
-
-    Query: {query}
-
-    Respond with a numbered list of intents/questions."""
-
-    intent_response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are an intent identification assistant. Identify and list all distinct intents or questions within the given query."},
-            {"role": "user", "content": intent_prompt}
-        ]
-    )
-    intents = intent_response.choices[0].message.content.strip().split('\n')
-    return [intent.strip() for intent in intents if intent.strip()]
-def generate_keywords_per_intent(intent):
-    keyword_prompt = f"""Based on the following structured intent classification, generate 10-15 highly relevant keywords or phrases. 
-    Ensure the keywords cover all aspects of the intent, including the main topic, specific action, and key entities.
-
-    Intent Classification:
-    {intent}
-
-    Provide a comma-separated list of keywords."""
-
+# CHANGE 1: Modified to generate more keywords
+def generate_related_keywords(text):
+    keyword_prompt = f"Generate 10-20 relevant keywords or phrases from this text, separated by commas: {text}"
     keyword_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a keyword extraction assistant. Generate highly relevant keywords based on the given structured intent classification."},
+            {"role": "system", "content": "You are a keyword extraction assistant. Generate relevant keywords or phrases from the given text."},
             {"role": "user", "content": keyword_prompt}
         ]
     )
     keywords = keyword_response.choices[0].message.content.strip().split(',')
     return [keyword.strip() for keyword in keywords]
 
-def query_db_for_keywords(keywords):
+# CHANGE 2: Modified to return multiple top-scoring documents
+def query_db_for_keywords(keywords, top_k=3):
     conn = get_database_connection()
     c = conn.cursor()
     query = """
@@ -220,90 +198,76 @@ def query_db_for_keywords(keywords):
             score = sum(SequenceMatcher(None, keyword.lower(), tag.lower()).ratio() for tag in row[2].split(','))
             results.append((score, row))
     
-    # Sort by score in descending order and return the top 3 results
+    # Sort by score in descending order and return the top k results
     results.sort(reverse=True, key=lambda x: x[0])
-    return results[:3]
+    return [result[1] for result in results[:top_k]] if results else []
 
-def query_for_multiple_intents(intent_keywords):
-    intent_data = {}
-    all_db_results = set()  # Use a set to store unique documents
-    for intent, keywords in intent_keywords.items():
-        db_results = query_db_for_keywords(keywords)
-        
-        # Filter out already seen documents
-        new_db_results = [result for result in db_results if result[1][0] not in [r[1][0] for r in all_db_results]]
-        all_db_results.update(new_db_results)
-        
-        pinecone_context = query_pinecone(" ".join(keywords))
-        intent_data[intent] = {
-            'db_results': new_db_results,
-            'pinecone_context': pinecone_context
-        }
-    return intent_data
-
-def generate_multi_intent_answer(query, intent_data):
-    context = "\n".join([f"Intent: {intent}\nDB Results: {data['db_results']}\nPinecone Context: {data['pinecone_context']}" for intent, data in intent_data.items()])
-    max_context_tokens = 4000
+# CHANGE 3: Modified to incorporate information from multiple related documents
+def get_answer(query):
+    context = query_pinecone(query)
+    max_context_tokens = 3000
     truncated_context = truncate_text(context, max_context_tokens)
     
-    response = client.chat.completions.create(
+    # Generate keywords from the query
+    query_keywords = generate_related_keywords(query)
+    
+    # Generate an initial response based on the query and context
+    initial_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": """You are College Buddy, an AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
-
-1. First, clearly state the number of distinct intents or questions identified in the user's query.
-2. For each intent or question, provide a separate, comprehensive answer.
-3. Use the provided context to answer each intent or question accurately and relevantly.
-4. If the context doesn't contain sufficient information to answer any part of the query, state this clearly for that specific intent or question.
-5. Maintain a friendly, supportive tone appropriate for assisting students.
-6. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
-7. If asked about topics beyond the scope of the provided context, politely state that you don't have that information for the specific intent or question.
-8. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
-9. Respect academic integrity by not writing essays or completing assignments on behalf of students.
-10. Suggest additional resources only if directly relevant to the specific intent or question.
-11. After answering each intent or question, list the most relevant related documents for that specific intent, if available.
-
-Structure your response clearly, addressing each intent or question separately."""},
-            {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}"}
+            {"role": "system", "content": """You are College Buddy, an advanced AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
+1. Focus on delivering accurate, relevant information derived from the provided context.
+2. If the context doesn't contain sufficient information to answer a query, state this clearly and offer to help with what is available.
+3. Maintain a friendly, supportive tone appropriate for assisting students.
+4. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
+5. If asked about topics beyond the scope of the provided context, politely redirect the conversation to the available information.
+6. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
+7. Respect academic integrity by not writing essays or completing assignments on behalf of students.
+8. Additional Resources: Suggest any additional resources or videos for further learning.
+   Include citations for the title of the video the information is from and the timestamp where relevant information is presented.
+9. For multi-intent queries, address each part of the question separately and thoroughly.
+"""},
+            {"role": "user", "content": f"Context: {truncated_context}\n\nQuestion: {query}"}
         ]
     )
    
-    return response.choices[0].message.content.strip()
-
-def extract_keywords_from_response(response):
-    keyword_prompt = f"Extract 5-10 key terms or phrases from this text, separated by commas: {response}"
-    keyword_response = client.chat.completions.create(
+    initial_answer = initial_response.choices[0].message.content.strip()
+    
+    # Generate related keywords from the initial answer
+    answer_keywords = generate_related_keywords(initial_answer)
+    
+    # Combine and deduplicate keywords
+    all_keywords = list(set(query_keywords + answer_keywords))
+    
+    # Query the database using the combined keywords
+    related_docs = query_db_for_keywords(all_keywords, top_k=3)
+    
+    # Generate a final response incorporating the related document information
+    docs_info = "\n".join([f"Document {i+1}: {doc[1]}" for i, doc in enumerate(related_docs)])
+    final_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a keyword extraction assistant. Extract key terms or phrases from the given text."},
-            {"role": "user", "content": keyword_prompt}
+            {"role": "system", "content": """You are College Buddy, an advanced AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
+1. Focus on delivering accurate, relevant information derived from the provided context and related documents.
+2. If the context doesn't contain sufficient information to answer a query, state this clearly and offer to help with what is available.
+3. Maintain a friendly, supportive tone appropriate for assisting students.
+4. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
+5. If asked about topics beyond the scope of the provided context, politely redirect the conversation to the available information.
+6. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
+7. Respect academic integrity by not writing essays or completing assignments on behalf of students.
+8. Additional Resources: Suggest any additional resources or videos for further learning.
+   Include citations for the title of the video the information is from and the timestamp where relevant information is presented.
+9. For multi-intent queries, address each part of the question separately and thoroughly.
+10. Incorporate information from multiple related documents when relevant.
+"""},
+            {"role": "user", "content": f"Initial Answer: {initial_answer}\n\nRelated Documents:\n{docs_info}\n\nPlease provide a final answer that incorporates information from the related documents, if relevant. Address all parts of the original query: {query}"}
         ]
     )
-    keywords = keyword_response.choices[0].message.content.strip().split(',')
-    return [keyword.strip() for keyword in keywords]
+   
+    final_answer = final_response.choices[0].message.content.strip()
+    
+    return final_answer, related_docs, all_keywords
 
-# Updated get_answer function
-def get_answer(query):
-    intents = identify_intents(query)
-    all_keywords = []
-    intent_data = {}
-    
-    for intent in intents:
-        keywords = generate_keywords_per_intent(intent)
-        all_keywords.extend(keywords)
-        intent_data.update(query_for_multiple_intents({intent: keywords}))
-    
-    initial_answer = generate_multi_intent_answer(query, intent_data)
-    
-    response_keywords = extract_keywords_from_response(initial_answer)
-    
-    all_keywords = list(set(all_keywords + response_keywords))
-    
-    expanded_intent_data = query_for_multiple_intents({query: all_keywords})
-    
-    final_answer = generate_multi_intent_answer(query, expanded_intent_data)
-    
-    return final_answer, expanded_intent_data, all_keywords, intents
 # Streamlit Interface
 st.set_page_config(page_title="College Buddy Assistant", layout="wide")
 st.title("College Buddy Assistant")
@@ -363,18 +327,13 @@ if st.button("Get Answer"):
     elif 'current_question' not in st.session_state:
         st.warning("Please enter a question or select a popular question before searching.")
 
-# Update the answer display section
+# Display the answer
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
-        answer, intent_data, keywords, identified_intents = get_answer(st.session_state.current_question)
+        answer, related_docs, keywords = get_answer(st.session_state.current_question)
         
         st.subheader("Question:")
         st.write(st.session_state.current_question)
-        
-        st.subheader("Identified Intents:")
-        for i, intent in enumerate(identified_intents, 1):
-            st.write(f"{i}. {intent}")
-        
         st.subheader("Answer:")
         st.write(answer)
         
@@ -382,22 +341,21 @@ if 'current_question' in st.session_state:
         st.write(", ".join(keywords))
         
         st.subheader("Related Documents:")
-        displayed_docs = set()
-        for intent, data in intent_data.items():
-            for score, doc in data['db_results']:
-                if doc[0] not in displayed_docs:
-                    displayed_docs.add(doc[0])
-                    with st.expander(f"Document: {doc[1]} (Relevance: {score:.2f})"):
-                        st.write(f"ID: {doc[0]}")
-                        st.write(f"Title: {doc[1]}")
-                        st.write(f"Tags: {doc[2]}")
-                        st.write(f"Link: {doc[3]}")
-                        
-                        highlighted_tags = doc[2]
-                        for keyword in keywords:
-                            highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
-                        st.markdown(f"Matched Tags: {highlighted_tags}")
-                        st.write("---")
+        if related_docs:
+            for i, doc in enumerate(related_docs):
+                with st.expander(f"Document {i+1}: {doc[1]}"):
+                    st.write(f"ID: {doc[0]}")
+                    st.write(f"Title: {doc[1]}")
+                    st.write(f"Tags: {doc[2]}")
+                    st.write(f"Link: {doc[3]}")
+                    
+                    # Highlight matching keywords in tags
+                    highlighted_tags = doc[2]
+                    for keyword in keywords:
+                        highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
+                    st.markdown(f"Matched Tags: {highlighted_tags}")
+        else:
+            st.write("No related documents found.")
     
     # Add to chat history
     if 'chat_history' not in st.session_state:
