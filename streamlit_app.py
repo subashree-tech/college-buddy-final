@@ -86,15 +86,10 @@ def get_all_documents():
     return c.fetchall()
 
 def test_db_connection():
-    try:
+    
         conn = get_database_connection()
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM documents")
-        count = c.fetchone()[0]
-        st.write(f"Number of documents in database: {count}")
-    except Exception as e:
-        st.error(f"Database connection error: {str(e)}")
-
+       
 # Function to extract text from DOCX
 def extract_text_from_docx(file):
     doc = Document(file)
