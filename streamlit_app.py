@@ -295,7 +295,8 @@ with st.sidebar:
             st.text(f"File ID: {file_id}")
         st.subheader("Uploaded Documents")
         st.text(f"Total token count: {total_token_count}")
-
+if st.button("View Database"):
+        st.switch_page("pages/database.py")
    
 
 # Main content area
@@ -348,19 +349,48 @@ if 'current_question' in st.session_state:
                         for keyword in keywords:
                             highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
                         st.markdown(f"Matched Tags: {highlighted_tags}")
-    if st.button("View Database"):
-        st.switch_page("pages/database.py")
-    # Add to chat history
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    st.session_state.chat_history.append((st.session_state.current_question, answer))
+  
+    # Modify this part where we add to chat history
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+# Inside the block where we display the answer
+if 'current_question' in st.session_state:
+    with st.spinner("Searching for the best answer..."):
+        answer, related_doc, keywords = get_answer(st.session_state.current_question)
+        
+        # ... (existing code to display the answer, keywords, and related document)
+
+        # Modify how we add to chat history
+        st.session_state.chat_history.append({
+            "question": st.session_state.current_question,
+            "answer": answer,
+            "keywords": keywords,
+            "related_doc": related_doc
+        })
     
     # Clear the current question
     del st.session_state.current_question
-
+    
 # Add a section for displaying recent questions and answers
 if 'chat_history' in st.session_state and st.session_state.chat_history:
     st.header("Recent Questions and Answers")
-    for i, (q, a) in enumerate(reversed(st.session_state.chat_history[-5:])):
-        with st.expander(f"Q: {q}"):
-            st.write(f"A: {a}")
+    for entry in reversed(st.session_state.chat_history[-5:]):
+        with st.expander(f"Q: {entry['question']}"):
+            st.write(f"A: {entry['answer']}")
+            st.subheader("Related Keywords:")
+            st.write(", ".join(entry['keywords']))
+            st.subheader("Related Document:")
+            if entry['related_doc']:
+                doc = entry['related_doc']
+                st.write(f"Title: {doc[1]}")
+                st.write(f"Tags: {doc[2]}")
+                st.write(f"Link: {doc[3]}")
+                
+                # Highlight matching keywords in tags
+                highlighted_tags = doc[2]
+                for keyword in entry['keywords']:
+                    highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
+                st.markdown(f"Matched Tags: {highlighted_tags}")
+            else:
+                st.write("No related document found.")
