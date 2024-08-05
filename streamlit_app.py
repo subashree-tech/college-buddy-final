@@ -295,9 +295,8 @@ with st.sidebar:
             st.text(f"File ID: {file_id}")
         st.subheader("Uploaded Documents")
         st.text(f"Total token count: {total_token_count}")
-     if st.button("View Database"):
+    if st.button("View Database"):
         st.switch_page("pages/database.py")
-   
 
 # Main content area
 st.header("Popular Questions")
