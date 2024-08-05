@@ -67,9 +67,7 @@ def load_initial_data():
         c = conn.cursor()
         c.executemany("INSERT OR REPLACE INTO documents (id, title, tags, links) VALUES (?, ?, ?, ?)", data)
         conn.commit()
-        st.success("Initial data loaded successfully")
-    except Exception as e:
-        st.error(f"Error loading initial data: {str(e)}")
+       
 
 def insert_document(id, title, tags, links):
     if tags.strip() and links.strip():
