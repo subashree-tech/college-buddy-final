@@ -97,9 +97,8 @@ def insert_document(title, tags, links):
         c.execute("INSERT INTO documents (title, tags, links) VALUES (?, ?, ?)",
                   (title, tags, links))
         conn.commit()
-    else:
-        st.warning(f"Document '{title}' not inserted due to empty tags or links.")
-
+        return True
+    return False
 def get_all_documents():
     conn = get_database_connection()
     c = conn.cursor()
@@ -313,17 +312,9 @@ with st.sidebar:
         st.text(f"Total token count: {total_token_count}")
     if st.button("View Database"):
         st.switch_page("pages/database.py")
-    st.header("Add Document to Database")
-    new_doc_title = st.text_input("Document Title")
-    new_doc_tags = st.text_input("Tags (comma-separated)")
-    new_doc_links = st.text_input("Links")
-    if st.button("Add Document"):
-        if new_doc_title and new_doc_tags and new_doc_links:
-            insert_document(new_doc_title, new_doc_tags, new_doc_links)
-            st.success(f"Document '{new_doc_title}' added successfully!")
-        else:
-            st.warning("Please fill in all fields.")
-
+    if st.button("Manage Database"):
+        st.switch_page("pages/database.py")
+   
 # Main content area
 st.header("Popular Questions")
 # Initialize selected questions in session state
