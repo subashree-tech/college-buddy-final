@@ -51,20 +51,12 @@ EXAMPLE_QUESTIONS = [
 def get_database_connection():
     conn = sqlite3.connect('college_buddy.db', check_same_thread=False)
     return conn
+
 def init_db(conn):
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS documents
                  (id INTEGER PRIMARY KEY, title TEXT, tags TEXT, links TEXT)''')
     conn.commit()
-def insert_document(id, title, tags, links):
-    if tags.strip() and links.strip():
-        conn = get_database_connection()
-        c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO documents (id, title, tags, links) VALUES (?, ?, ?, ?)",
-                  (id, title, tags, links))
-        conn.commit()
-    else:
-        st.warning(f"Document '{title}' not inserted due to empty tags or links.")
 
 def load_initial_data():
     try:
@@ -99,6 +91,17 @@ def load_initial_data():
         st.success("Initial data loaded successfully")
     except Exception as e:
         st.error(f"Error loading initial data: {str(e)}")
+
+def insert_document(id, title, tags, links):
+    if tags.strip() and links.strip():
+        conn = get_database_connection()
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO documents (id, title, tags, links) VALUES (?, ?, ?, ?)",
+                  (id, title, tags, links))
+        conn.commit()
+    else:
+        st.warning(f"Document '{title}' not inserted due to empty tags or links.")
+
 def get_all_documents():
     conn = get_database_connection()
     c = conn.cursor()
@@ -114,6 +117,7 @@ def test_db_connection():
         st.write(f"Number of documents in database: {count}")
     except Exception as e:
         st.error(f"Database connection error: {str(e)}")
+
 # Function to extract text from DOCX
 def extract_text_from_docx(file):
     doc = Document(file)
@@ -224,7 +228,7 @@ def query_for_multiple_intents(intent_keywords):
 
 def generate_multi_intent_answer(query, intent_data):
     context = "\n".join([f"Intent: {intent}\nDB Results: {data['db_results']}\nPinecone Context: {data['pinecone_context']}" for intent, data in intent_data.items()])
-    max_context_tokens = 3000
+    max_context_tokens = 4000  # Increased from 3000
     truncated_context = truncate_text(context, max_context_tokens)
     
     response = client.chat.completions.create(
@@ -248,17 +252,38 @@ def generate_multi_intent_answer(query, intent_data):
    
     return response.choices[0].message.content.strip()
 
+def extract_keywords_from_response(response):
+    keyword_prompt = f"Extract 5-10 key terms or phrases from this text, separated by commas: {response}"
+    keyword_response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a keyword extraction assistant. Extract key terms or phrases from the given text."},
+            {"role": "user", "content": keyword_prompt}
+        ]
+    )
+    keywords = keyword_response.choices[0].message.content.strip().split(',')
+    return [keyword.strip() for keyword in keywords]
+
 # Updated get_answer function
 def get_answer(query):
     intents = identify_intents(query)
     intent_keywords = generate_keywords_per_intent(intents)
     intent_data = query_for_multiple_intents(intent_keywords)
-    final_answer = generate_multi_intent_answer(query, intent_data)
+    initial_answer = generate_multi_intent_answer(query, intent_data)
     
-    # Flatten keywords for display
-    all_keywords = list(set([keyword for keywords in intent_keywords.values() for keyword in keywords]))
+    # Extract keywords from the initial answer
+    response_keywords = extract_keywords_from_response(initial_answer)
     
-    return final_answer, intent_data, all_keywords
+    # Combine original keywords with response keywords
+    all_keywords = list(set([keyword for keywords in intent_keywords.values() for keyword in keywords] + response_keywords))
+    
+    # Query again with the expanded set of keywords
+    expanded_intent_data = query_for_multiple_intents({query: all_keywords})
+    
+    # Generate the final answer with the expanded context
+    final_answer = generate_multi_intent_answer(query, expanded_intent_data)
+    
+    return final_answer, expanded_intent_data, all_keywords
 
 # Streamlit Interface
 st.set_page_config(page_title="College Buddy Assistant", layout="wide")
@@ -319,7 +344,6 @@ if st.button("Get Answer"):
     elif 'current_question' not in st.session_state:
         st.warning("Please enter a question or select a popular question before searching.")
 
-
 # Update the answer display section
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
@@ -343,7 +367,7 @@ if 'current_question' in st.session_state:
                     st.write(f"Tags: {doc[2]}")
                     st.write(f"Link: {doc[3]}")
                     
-                    # Highlight matching keywords in tags
+                        # Highlight matching keywords in tags
                     highlighted_tags = doc[2]
                     for keyword in keywords:
                         highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
