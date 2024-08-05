@@ -51,34 +51,21 @@ def show():
     st.header("Existing Documents")
     documents = get_all_documents()
     if documents:
-        df = pd.DataFrame(documents, columns=['ID', 'Title', 'Tags', 'Links'])
-        
-        # Create a column for delete buttons
-        df['Delete'] = ['Delete' for _ in range(len(df))]
-        
-        # Display the dataframe with a column width adjustment for the delete column
-        st.data_editor(
-            df,
-            column_config={
-                "Delete": st.column_config.ButtonColumn(
-                    "Delete",
-                    help="Click to delete this document",
-                    width="small"
-                )
-            },
-            hide_index=True,
-            key="data_editor"
-        )
-        
-        # Check if any delete button was clicked
-        if st.session_state.data_editor:
-            edited_rows = st.session_state.data_editor['edited_rows']
-            for idx, row in edited_rows.items():
-                if row.get('Delete'):
-                    doc_id = df.iloc[idx]['ID']
-                    if delete_document(doc_id):
-                        st.success(f"Document with ID {doc_id} deleted successfully!")
-                        st.rerun()
+        for doc in documents:
+            col1, col2, col3, col4, col5 = st.columns([1,2,2,2,1])
+            with col1:
+                st.write(doc[0])  # ID
+            with col2:
+                st.write(doc[1])  # Title
+            with col3:
+                st.write(doc[2])  # Tags
+            with col4:
+                st.write(doc[3])  # Links
+            with col5:
+                if st.button('Delete', key=f"del_{doc[0]}"):
+                    if delete_document(doc[0]):
+                        st.success(f"Document with ID {doc[0]} deleted successfully!")
+                        st.experimental_rerun()
     else:
         st.write("The database is empty.")
 
