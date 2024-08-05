@@ -22,19 +22,21 @@ def insert_document(title, tags, links):
         return True
     return False
 
-def delete_document(doc_id):
+def delete_document_by_title(title):
     conn = get_database_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    conn.commit()
-    return True
+    c.execute("DELETE FROM documents WHERE title = ?", (title,))
+    if c.rowcount > 0:
+        conn.commit()
+        return True
+    return False
 
 def show():
     st.title("Database Management")
 
     # Form for adding new documents
     st.header("Add New Document")
-    new_doc_title = st.text_input("Document Title")
+    new_doc_title = st.text_input("Document Title", key="add_title")
     new_doc_tags = st.text_input("Tags (comma-separated)")
     new_doc_links = st.text_input("Links")
 
@@ -48,20 +50,26 @@ def show():
         else:
             st.warning("Please fill in all fields.")
 
+    # Form for deleting documents
+    st.header("Delete Document")
+    del_doc_title = st.text_input("Enter the title of the document to delete", key="del_title")
+
+    if st.button("Delete Document"):
+        if del_doc_title:
+            if delete_document_by_title(del_doc_title):
+                st.success(f"Document '{del_doc_title}' deleted successfully!")
+                st.experimental_rerun()
+            else:
+                st.warning(f"No document found with the title '{del_doc_title}'.")
+        else:
+            st.warning("Please enter a document title to delete.")
+
     # Display existing documents
     st.header("Existing Documents")
     documents = get_all_documents()
     if documents:
         df = pd.DataFrame(documents, columns=['ID', 'Title', 'Tags', 'Links'])
         st.table(df)
-
-        # Create delete buttons
-        st.subheader("Delete Documents")
-        for doc in documents:
-            if st.button(f"Delete document {doc[0]}", key=f"del_{doc[0]}"):
-                if delete_document(doc[0]):
-                    st.success(f"Document with ID {doc[0]} deleted successfully!")
-                    st.experimental_rerun()
     else:
         st.write("The database is empty.")
 
