@@ -56,6 +56,15 @@ def init_db(conn):
     c.execute('''CREATE TABLE IF NOT EXISTS documents
                  (id INTEGER PRIMARY KEY, title TEXT, tags TEXT, links TEXT)''')
     conn.commit()
+def insert_document(id, title, tags, links):
+    if tags.strip() and links.strip():
+        conn = get_database_connection()
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO documents (id, title, tags, links) VALUES (?, ?, ?, ?)",
+                  (id, title, tags, links))
+        conn.commit()
+    else:
+        st.warning(f"Document '{title}' not inserted due to empty tags or links.")
 
 def load_initial_data():
     try:
