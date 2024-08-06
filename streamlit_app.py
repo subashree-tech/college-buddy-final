@@ -233,22 +233,42 @@ def generate_multi_intent_answer(query, intent_data):
         model="gpt-4o",
         messages=[
             {"role": "system", "content": """You are College Buddy, an AI assistant designed to help students with their academic queries. Your primary function is to analyze and provide insights based on the context of uploaded documents. Please adhere to the following guidelines:
+
 1. Focus on addressing the primary intent of the query.
 2. Provide accurate, relevant information derived from the provided context.
-3. If the context doesn't contain sufficient information to answer the query, state this clearly.
-4. Maintain a friendly, supportive tone appropriate for assisting students.
-5. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
-6. If asked about topics beyond the scope of the provided context, politely state that you don't have that information.
-7. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
-8. Respect academic integrity by not writing essays or completing assignments on behalf of students.
-9. Suggest additional resources only if directly relevant to the primary query.
+3. Always include references to related documents in your answer. If no documents are directly relevant, mention the most closely related ones and explain why they might be useful.
+4. If the context doesn't contain sufficient information to answer the query, state this clearly and suggest alternative sources or ways to find the information.
+5. Maintain a friendly, supportive tone appropriate for assisting students.
+6. Provide concise yet comprehensive answers, breaking down complex concepts when necessary.
+7. If asked about topics beyond the scope of the provided context, politely state that you don't have that information and suggest where the student might find it.
+8. Encourage critical thinking by guiding students towards understanding rather than simply providing direct answers.
+9. Respect academic integrity by not writing essays or completing assignments on behalf of students.
+10. Suggest additional resources only if directly relevant to the primary query.
+11. Structure your responses for clarity:
+    a. Start with a direct answer to the query
+    b. Provide supporting details and explanations
+    c. List relevant documents and explain their connection to the query
+    d. Conclude with any necessary caveats or suggestions for further research
+12. If multiple documents are relevant, prioritize and summarize the most important information from each.
+13. Use bullet points or numbered lists for complex information to enhance readability.
+14. If a query is ambiguous, ask for clarification before providing an answer.
+15. Always strive for efficiency in your answers: be thorough but avoid unnecessary verbosity.
 """},
-            {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}"}
+            {"role": "user", "content": f"Query: {query}\n\nContext: {truncated_context}\n\nPlease provide a clear, concise answer to the query, including references to relevant documents."}
         ]
     )
    
-    return response.choices[0].message.content.strip()
-
+    answer = response.choices[0].message.content.strip()
+    
+    # Check if document references are included, if not, append them
+    if "Related Documents:" not in answer:
+        doc_references = "\n\nRelated Documents:\n"
+        for intent, data in intent_data.items():
+            for score, doc in data['db_results']:
+                doc_references += f"- {doc[1]} (ID: {doc[0]})\n"
+        answer += doc_references
+    
+    return answer
 def extract_keywords_from_response(response):
     keyword_prompt = f"Extract 5-10 key terms or phrases from this text, separated by commas: {response}"
     keyword_response = client.chat.completions.create(
@@ -261,23 +281,17 @@ def extract_keywords_from_response(response):
     keywords = keyword_response.choices[0].message.content.strip().split(',')
     return [keyword.strip() for keyword in keywords]
 
-# Updated get_answer function
+# Update the get_answer function to use the new generate_multi_intent_answer
 def get_answer(query):
     intents = identify_intents(query)
     intent_keywords = generate_keywords_per_intent(intents)
     intent_data = query_for_multiple_intents(intent_keywords)
     initial_answer = generate_multi_intent_answer(query, intent_data)
     
-    # Extract keywords from the initial answer
     response_keywords = extract_keywords_from_response(initial_answer)
-    
-    # Combine original keywords with response keywords, prioritizing original query keywords
     all_keywords = list(set(intent_keywords[intents[0]] + response_keywords))
     
-    # Query again with the expanded set of keywords
     expanded_intent_data = query_for_multiple_intents({query: all_keywords})
-    
-    # Generate the final answer with the expanded context
     final_answer = generate_multi_intent_answer(query, expanded_intent_data)
     
     return final_answer, expanded_intent_data, all_keywords
@@ -335,7 +349,7 @@ if st.button("Get Answer"):
     elif 'current_question' not in st.session_state:
         st.warning("Please enter a question or select a popular question before searching.")
 
-# Update the answer display section
+# Update the Streamlit interface to display the answer and related documents
 if 'current_question' in st.session_state:
     with st.spinner("Searching for the best answer..."):
         answer, intent_data, keywords = get_answer(st.session_state.current_question)
@@ -348,23 +362,23 @@ if 'current_question' in st.session_state:
         st.subheader("Related Keywords:")
         st.write(", ".join(keywords))
         
-        st.subheader("Related Documents:")
-        displayed_docs = set()  # Use a set to keep track of displayed documents
-        for intent, data in intent_data.items():
-            for score, doc in data['db_results']:
-                if doc[0] not in displayed_docs:  # Check if the document has already been displayed
-                    displayed_docs.add(doc[0])
-                    with st.expander(f"Document: {doc[1]}"):
-                        st.write(f"ID: {doc[0]}")
-                        st.write(f"Title: {doc[1]}")
-                        st.write(f"Tags: {doc[2]}")
-                        st.write(f"Link: {doc[3]}")
-                        
-                        # Highlight matching keywords in tags
-                        highlighted_tags = doc[2]
-                        for keyword in keywords:
-                            highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
-                        st.markdown(f"Matched Tags: {highlighted_tags}")
+        if "Related Documents:" not in answer:
+            st.subheader("Related Documents:")
+            displayed_docs = set()
+            for intent, data in intent_data.items():
+                for score, doc in data['db_results']:
+                    if doc[0] not in displayed_docs:
+                        displayed_docs.add(doc[0])
+                        with st.expander(f"Document: {doc[1]}"):
+                            st.write(f"ID: {doc[0]}")
+                            st.write(f"Title: {doc[1]}")
+                            st.write(f"Tags: {doc[2]}")
+                            st.write(f"Link: {doc[3]}")
+                            
+                            highlighted_tags = doc[2]
+                            for keyword in keywords:
+                                highlighted_tags = highlighted_tags.replace(keyword, f"**{keyword}**")
+                            st.markdown(f"Matched Tags: {highlighted_tags}")
   
     # Add to chat history
     if 'chat_history' not in st.session_state:
